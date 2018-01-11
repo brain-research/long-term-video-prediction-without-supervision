@@ -1,5 +1,7 @@
 # Unsupervised Hierarchical Video Prediction
 
+This is not an official Google product.
+
 This is the implementation of
 https://openreview.net/forum?id=rkmtTJZCb&noteId=rkmtTJZCb.
 
