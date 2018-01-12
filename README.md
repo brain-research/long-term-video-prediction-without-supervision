@@ -2,8 +2,8 @@
 
 This is not an official Google product.
 
-This is the implementation of
-https://openreview.net/forum?id=rkmtTJZCb&noteId=rkmtTJZCb.
+This is the implementation of [Unsupervised Hierarchical Video
+Prediction](https://openreview.net/pdf?id=rkmtTJZCb).
 
 It can predict future frames in a video given the first few frames as context
 and optionally the agent's action.
@@ -27,6 +27,20 @@ __Individual__: Train each network individually using a ground truth pose as the
 high level structure.
 
 __E2E with pose__: A hybrid of the E2E and individual methods.
+
+## Download data
+
+You will need to download the [pretrained vgg
+model](https://storage.googleapis.com/unsupervised-hierarch-video-data/data-1-11-18/vgg_16.ckpt)
+and one of the following datasets to train the model:
+
+*   [Robot Push
+    Dataset](https://storage.googleapis.com/unsupervised-hierarch-video-data/data-1-11-18/robot.tar.gz)
+    [^1]
+
+*   [Humans 3.6M
+    Dataset](https://storage.googleapis.com/unsupervised-hierarch-video-data/data-1-11-18/humans.tar.gz)
+    [^2]
 
 ## Commands
 
@@ -89,3 +103,11 @@ EPEV:
 --van_keep_prob .9 --batch_size 8 --sequence_length 64 --skip_num 2
 --context_frames 5 --run_mode "train" --is_training --train_steps 3000000
 --clip_gradient_norm .01`
+
+[^1]: Chelsea Finn, Ian Goodfellow, and Sergey Levine. Unsupervised learning for
+    physical interaction through video prediction. In Advances in Neural
+    Information Processing Systems, pp. 64–72, 2016.
+[^2]: Catalin Ionescu, Dragos Papava, Vlad Olaru, and Cristian Sminchisescu.
+    Human3.6m: Large scale datasets and predictive methods for 3d human
+    sensing in natural environments. IEEE Transactions on Pattern Analysis and
+    Machine Intelligence, 36(7):1325–1339, jul 2014.
