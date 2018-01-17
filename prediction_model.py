@@ -978,26 +978,15 @@ def calc_quaternion_loss(predictions, labels, params):
   return cost
 
 
+def add_video_summary(images, name):
+  sum_freq = int(len(images) / 4 + 1)
+  for i in range(0, len(images), sum_freq) + [len(images)-1]:
+    tf.summary.image(name + '_frame_' + str(i), images[i], 4)
+
+
 def add_video_summaries(images, gen_images, name):
-  del images, gen_images, name
-
-
-#  with tf.device('/cpu:0'):
-#    if gen_images:
-#      if images is not None:
-#        summary_ops.AnimatedWebpSummary(
-#            name + '/real',
-#            tf.concat(images, 3) * 255,
-#            channels=3,
-#            min_range=0,
-#            max_range=255,
-#            max_animations=4,
-#            frame_length_ms=100)
-#      summary_ops.AnimatedWebpSummary(
-#          name + '/gen',
-#          tf.concat(gen_images, 3) * 255,
-#          channels=3,
-#          min_range=0,
-#          max_range=255,
-#          max_animations=4,
-#          frame_length_ms=100)
+  with tf.device('/cpu:0'):
+    if gen_images:
+      if images is not None:
+        add_video_summary(images, name + '/real')
+      add_video_summary(gen_images, name + '/gen')
