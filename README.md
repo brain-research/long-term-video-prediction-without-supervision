@@ -99,7 +99,7 @@ EPEV:
 
 `python prediction_train.py --model_mode epev --dataset_type human
 --imgnet_pretrain --all_learning_rate 1e-05 --enc_pred_loss_scale .1
---enc_pred_loss_scale_delay 6e5 --enc_size_set 32 --enc_keep_prob .65
+--enc_pred_loss_scale_delay 6e5 --enc_size_set 64 --enc_keep_prob .65
 --van_keep_prob .9 --batch_size 8 --sequence_length 64 --skip_num 2
 --context_frames 5 --run_mode "train" --is_training --train_steps 3000000
 --clip_gradient_norm .01`
