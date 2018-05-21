@@ -31,10 +31,27 @@ ACTION_FEATURE_NAME = 'actions'
 
 def get_input_fn(pattern, flags, batch_size, is_tpu):
   """Returns the correct input function for TPU or GPU."""
-  if is_tpu:
-    return get_input_fn_dataset(pattern, flags, batch_size)
-  else:
-    return get_input_fn_queue(pattern, flags, batch_size)
+
+  def input_fn(params=None):
+    """Calls the appropriate input_fn and augments the data."""
+    del params
+    if is_tpu:
+      features = get_input_fn_dataset(pattern, flags, batch_size)()[0]
+    else:
+      features = get_input_fn_queue(pattern, flags, batch_size)()[0]
+
+    if flags.color_data_augment:
+
+      def augment_img(image):
+        image = tf.image.random_hue(image, .5)
+        return image
+
+      features[IMAGE_FEATURE_NAME] = tf.map_fn(
+          augment_img, features[IMAGE_FEATURE_NAME], parallel_iterations=32)
+
+    return features, None
+
+  return input_fn
 
 
 def get_input_fn_dataset(pattern, flags, batch_size):

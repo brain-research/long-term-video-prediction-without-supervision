@@ -88,8 +88,8 @@ def _get_concat_variable(name, shape, dtype, num_shards):
 def _get_shared_variable(name, shape, dtype, num_shards):
   """Get a list of sharded variables with the given dtype."""
   if num_shards > shape[0]:
-    raise ValueError('Too many shards: shape=%s, num_shards=%d' % (shape,
-                                                                   num_shards))
+    raise ValueError(
+        'Too many shards: shape=%s, num_shards=%d' % (shape, num_shards))
   unit_shard_size = int(math.floor(shape[0] / num_shards))
   remaining_rows = shape[0] - unit_shard_size * num_shards
 

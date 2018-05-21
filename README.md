@@ -1,7 +1,5 @@
 # Unsupervised Hierarchical Video Prediction
 
-This is not an official Google product.
-
 This is the implementation of [Unsupervised Hierarchical Video
 Prediction](https://openreview.net/pdf?id=rkmtTJZCb).
 
@@ -19,7 +17,7 @@ The network can be trained in different ways:
 __E2E__: Train the network end to end to minimize the loss with the predicted
 frame.
 
-__EPEV__: Train the encoder and predictor together so the high level structure
+__EPVA__: Train the encoder and predictor together so the high level structure
 is easy to predict. Also train the encoder and VAN together so the high level
 structure is informative enough to generate the frame.
 
@@ -57,9 +55,37 @@ Use the same commands for validation except:
 
 *   Add the nois_training flag and set run_mode to "eval".
 
-*   Set data_pattern to "validation"
+*   Set data_pattern to "*validation*"
 
 *   Remove the enc_keep_prob and van_keep_prob flags.
+
+### Humans dataset
+
+EPVA Gan:
+
+`python prediction_train.py --model_mode epva_gan --enc_learning_rate 1e-5
+--pred_learning_rate_map 1e-06 --van_learning_rate 3e-06 --discrim_learning_rate
+3e-06 --enc_pred_loss_scale 10 --enc_size_set 64 --enc_keep_prob .65
+--van_keep_prob .9 --batch_size 16 --sequence_length 64 --skip_num 2
+--context_frames 5 --run_mode "train" --is_training --train_steps 1000000
+--clip_gradient_norm .01 --pred_noise_std 1.0 --enc_pred_use_l2norm`
+
+EPVA:
+
+`python prediction_train.py --model_mode epva --imgnet_pretrain
+--all_learning_rate 1e-05 --enc_pred_loss_scale .1 --enc_pred_loss_scale_delay
+6e5 --enc_size_set 64 --enc_keep_prob .65 --van_keep_prob .9 --batch_size 8
+--sequence_length 64 --skip_num 2 --context_frames 5 --run_mode "train"
+--is_training --train_steps 3000000 --clip_gradient_norm .01 --epv_pretrain_ckpt
+''`
+
+E2E:
+
+`python prediction_train.py --model_mode e2e --dataset_type human
+--all_learning_rate 1e-05 --enc_size_set 64 --enc_keep_prob .65 --van_keep_prob
+.9 --batch_size 8 --sequence_length 64 --skip_num 2 --context_frames 5
+--run_mode "train" --is_training --train_steps 3000000 --clip_gradient_norm .01
+--epv_pretrain_ckpt ''`
 
 ### Robot Push dataset
 
@@ -70,9 +96,9 @@ E2E:
 .9 --batch_size 8 --sequence_length 20 --skip_num 1 --run_mode "train"
 --is_training --train_steps 3000000 --clip_gradient_norm .01`
 
-EPEV:
+EPVA:
 
-`python prediction_train.py --model_mode epev --dataset_type robot
+`python prediction_train.py --model_mode epva --dataset_type robot
 --imgnet_pretrain --all_learning_rate 1e-05 --enc_pred_loss_scale 1
 --enc_pred_loss_scale_delay 6e5 --enc_size_set 32 --enc_keep_prob .65
 --van_keep_prob .9 --batch_size 8 --sequence_length 20 --skip_num 1 --run_mode
@@ -86,24 +112,6 @@ Individual:
 --sequence_length 20 --skip_num 1 --run_mode "train" --is_training --train_steps
 3000000 --clip_gradient_norm .01`
 
-### Humans dataset
-
-E2E:
-
-`python prediction_train.py --model_mode e2e --dataset_type human
---all_learning_rate 1e-05 --enc_size_set 32 --enc_keep_prob .65 --van_keep_prob
-.9 --batch_size 8 --sequence_length 64 --skip_num 2 --context_frames 5
---run_mode "train" --is_training --train_steps 3000000 --clip_gradient_norm .01`
-
-EPEV:
-
-`python prediction_train.py --model_mode epev --dataset_type human
---imgnet_pretrain --all_learning_rate 1e-05 --enc_pred_loss_scale .1
---enc_pred_loss_scale_delay 6e5 --enc_size_set 32 --enc_keep_prob .65
---van_keep_prob .9 --batch_size 8 --sequence_length 64 --skip_num 2
---context_frames 5 --run_mode "train" --is_training --train_steps 3000000
---clip_gradient_norm .01`
-
 [^1]: Chelsea Finn, Ian Goodfellow, and Sergey Levine. Unsupervised learning for
     physical interaction through video prediction. In Advances in Neural
     Information Processing Systems, pp. 64–72, 2016.
@@ -111,3 +119,5 @@ EPEV:
     Human3.6m: Large scale datasets and predictive methods for 3d human
     sensing in natural environments. IEEE Transactions on Pattern Analysis and
     Machine Intelligence, 36(7):1325–1339, jul 2014.
+
+This is not an official Google product.

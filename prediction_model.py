@@ -128,6 +128,8 @@ def van_enc_2d(x, first_depth, reuse=False, flags=None):
         padding='same',
         activation=tf.nn.relu,
         strides=2)
+    van_higher_level_2 = tf.reshape(enc, [-1, 8 * 8 * first_depth * 2])
+
     enc = tf.layers.conv2d_transpose(
         enc,
         first_depth * 2,
@@ -143,8 +145,11 @@ def van_enc_2d(x, first_depth, reuse=False, flags=None):
         padding='same',
         activation=tf.nn.relu,
         strides=1)
+    van_higher_level_4 = tf.reshape(enc, [-1, 8 * 8 * first_depth * 4])
 
-    return enc
+    van_higher_level = tf.concat([x, van_higher_level_2, van_higher_level_4], 1)
+
+    return enc, van_higher_level
 
 
 def van_dec_2d(x, skip_connections, output_shape, first_depth, flags=None):
@@ -265,7 +270,13 @@ def analogy_computation_2d(f_first_enc,
         strides=1)
 
 
-def van(first_enc, first_frame, current_enc, gt_image, reuse=False, flags=None):
+def van(first_enc,
+        first_frame,
+        current_enc,
+        gt_image,
+        reuse=False,
+        scope_prefix='',
+        flags=None):
   """Implements a VAN.
 
   Args:
@@ -274,21 +285,22 @@ def van(first_enc, first_frame, current_enc, gt_image, reuse=False, flags=None):
     current_enc: The encoding of the frame to generate.
     gt_image: The ground truth image, only used for regularization.
     reuse: To reuse in variable scope or not.
+    scope_prefix: The prefix before the scope name.
     flags: The python flags.
 
   Returns:
     The generated image.
   """
-  with tf.variable_scope('van', reuse=reuse):
+  with tf.variable_scope(scope_prefix + 'van', reuse=reuse):
     output_shape = first_frame.get_shape().as_list()
     output_shape[0] = -1
 
     first_depth = 64
 
-    f_first_enc = van_enc_2d(first_enc, first_depth, flags=flags)
+    f_first_enc, _ = van_enc_2d(first_enc, first_depth, flags=flags)
     f_first_frame, image_enc_history = van_image_enc_2d(
         first_frame, first_depth, flags=flags)
-    f_current_enc = van_enc_2d(
+    f_current_enc, van_higher_level = van_enc_2d(
         current_enc, first_depth, reuse=True, flags=flags)
     f_gt_image, _ = van_image_enc_2d(gt_image, first_depth, True, flags=flags)
 
@@ -302,7 +314,7 @@ def van(first_enc, first_frame, current_enc, gt_image, reuse=False, flags=None):
     batch_size = tf.to_float(tf.shape(first_enc)[0])
     r_loss = tf.nn.l2_loss(f_gt_image - f_current_enc - analogy_t) / batch_size
 
-    return img, r_loss
+    return img, r_loss, van_higher_level
 
 
 def encoder_vgg(x, enc_final_size, reuse=False, scope_prefix='', flags=None):
@@ -321,6 +333,10 @@ def encoder_vgg(x, enc_final_size, reuse=False, scope_prefix='', flags=None):
     The generated image.
   """
   with tf.variable_scope(scope_prefix + 'encoder', reuse=reuse):
+
+    if flags.encoder_grey_in:
+      x = tf.image.rgb_to_grayscale(x)
+      x = tf.tile(x, [1, 1, 1, 3])
 
     # Preprocess input
     x *= 256
@@ -373,8 +389,20 @@ def predictor(enc_flat,
     pre_pred = tf.layers.dense(
         pre_pred,
         initial_size,
-        tf.nn.relu,
         kernel_initializer=tf.truncated_normal_initializer(stddev=init_stddev))
+
+    if flags.pred_noise_std > 0:
+      # Add the noise like this so a pretrained model can be used.
+      pred_noise = tf.random_normal(
+          shape=[batch_size, 100], stddev=flags.pred_noise_std)
+      pre_pred += tf.layers.dense(
+          pred_noise,
+          initial_size,
+          kernel_initializer=tf.truncated_normal_initializer(
+              stddev=init_stddev),
+          name='noise_dense')
+
+    pre_pred = tf.nn.relu(pre_pred)
 
     if lstm_states[pred_depth - 2] is None:
       if not flags.use_legacy_vars:
@@ -430,7 +458,168 @@ def predictor(enc_flat,
     if flags.enc_pred_use_l2norm:
       pred = tf.nn.l2_normalize(pred, 1)
 
+    for lstm_i in range(len(lstm_states)):
+      if lstm_states[lstm_i] is None:
+        break
+
+      lstm_std = tf.reduce_mean(
+          tf.sqrt(tf.nn.moments(lstm_states[lstm_i], axes=[1])[1]))
+      lstm_state_noise = tf.truncated_normal(
+          lstm_states[lstm_i].shape,
+          stddev=flags.lstm_state_noise_stddev * lstm_std)
+
+      lstm_states[lstm_i] += lstm_state_noise
+
     return pred
+
+
+def enc_pred_discrim(x, pre_result, lstm_states, flags):
+  """Judges encoding is from the encoder or predictor.
+
+  Chain these together to judge the entire sequence of encodings.
+
+  Args:
+    x: The encoding and higher level encodings from the VAN.
+    pre_result: The result from the pervious encoding
+    lstm_states: The states to use and update.
+    flags: The python flags.
+
+  Returns:
+    Tensor which can be used to determine if the input is from the enc or pred.
+  """
+
+  first_depth = 64
+  orig_x_shape = x.get_shape().as_list()
+  van_higher_level_size2 = 8 * 8 * first_depth * 2
+  van_higher_level_size4 = 8 * 8 * first_depth * 4
+
+  x, van_higher_level2, van_higher_level4 = tf.split(
+      x, [flags.enc_size, van_higher_level_size2, van_higher_level_size4], 1)
+
+  van_higher_level2 = tf.reshape(van_higher_level2, [-1, 8, 8, first_depth * 2])
+  van_higher_level4 = tf.reshape(van_higher_level4, [-1, 8, 8, first_depth * 4])
+
+  van_higher_level2 = tf.layers.conv2d(
+      van_higher_level2,
+      first_depth,
+      3,
+      padding='same',
+      activation=tf.nn.relu,
+      strides=2)
+  van_higher_level2 = tf.layers.conv2d(
+      van_higher_level2,
+      first_depth,
+      3,
+      padding='same',
+      activation=tf.nn.relu,
+      strides=2)
+  van_higher_level2 = tf.reshape(
+      tf.contrib.layers.layer_norm(van_higher_level2),
+      [orig_x_shape[0], 2 * 2 * first_depth])
+
+  van_higher_level4 = tf.layers.conv2d(
+      van_higher_level4,
+      first_depth * 2,
+      3,
+      padding='same',
+      activation=tf.nn.relu,
+      strides=2)
+  van_higher_level4 = tf.layers.conv2d(
+      van_higher_level4,
+      first_depth * 1,
+      3,
+      padding='same',
+      activation=tf.nn.relu,
+      strides=2)
+  van_higher_level4 = tf.reshape(
+      tf.contrib.layers.layer_norm(van_higher_level4),
+      [orig_x_shape[0], 2 * 2 * first_depth])
+
+  x = tf.concat([x, van_higher_level2, van_higher_level4], 1)
+
+  batch_size = x.get_shape().as_list()[0]
+
+  if pre_result is None:
+    pre_result = [tf.zeros(shape=flags.enc_size)] * batch_size
+
+  result = tf.concat([x, pre_result], 1)
+
+  result, lstm_states[0] = tf_ops.lstm_cell(
+      result,
+      lstm_states[0],
+      flags.enc_size * 4,
+      use_peepholes=True,
+      num_proj=flags.enc_size * 4)
+  result = tf.contrib.layers.layer_norm(result)
+
+  result, lstm_states[2] = tf_ops.lstm_cell(
+      result,
+      lstm_states[2],
+      flags.enc_size * 4,
+      use_peepholes=True,
+      num_proj=flags.enc_size * 4)
+  result = tf.contrib.layers.layer_norm(result)
+
+  result, lstm_states[3] = tf_ops.lstm_cell(
+      result,
+      lstm_states[3],
+      flags.enc_size * 2,
+      use_peepholes=True,
+      num_proj=flags.enc_size * 2)
+  result = tf.contrib.layers.layer_norm(result)
+
+  result, lstm_states[4] = tf_ops.lstm_cell(
+      result,
+      lstm_states[4],
+      flags.enc_size,
+      use_peepholes=True,
+      num_proj=flags.enc_size)
+  result = tf.contrib.layers.layer_norm(result)
+
+  return result
+
+
+def enc_pred_discrim_final(x, flags):
+  """Final step to judge if the encodings are from the encoder or predictor."""
+  del flags
+  return tf.layers.dense(x, 1)
+
+
+def get_enc_pred_discrim_full(flags):
+  """Wraper for enc_pred_discrim_full."""
+
+  def enc_pred_discrim_full(x, _):
+    """Judges if the encodings are from the encoder or predictor.
+
+    Compatible with tf gan.
+
+    Args:
+      x: The encodings and higher level encodings from the VAN.
+
+    Returns:
+      Confidence of the input being from the encoder.
+    """
+
+    lstm_states = [None] * 10
+    discrim_pre = None
+
+    x = tf.transpose(x, [1, 0, 2])
+
+    x_shape = x.get_shape().as_list()
+    x = tf.split(x, [1] * x_shape[0], 0)
+
+    reuse = False
+    for x_t in x:
+      with tf.variable_scope('timestep', reuse=reuse):
+        x_t = tf.squeeze(x_t, 0)
+        discrim_part = enc_pred_discrim(x_t, discrim_pre, lstm_states, flags)
+        discrim_pre = discrim_part
+
+      reuse = True
+
+    return enc_pred_discrim_final(discrim_part, flags)
+
+  return enc_pred_discrim_full
 
 
 def get_pose_from_enc(enc, pose_size):
@@ -450,6 +639,8 @@ class ModelOutputs(object):
     self.van_out_all = []
     self.van_on_enc_all = []
     self.van_on_pose_all = []
+    self.van_higher_on_enc_all = []
+    self.van_higher_on_pred_all = []
 
 
 def construct_model(images,
@@ -462,8 +653,6 @@ def construct_model(images,
   del iter_num
 
   pred_depth = 20
-  if flags.model_mode == 'epev_gann':
-    pred_depth = 2
 
   model_outputs = ModelOutputs()
 
@@ -479,6 +668,17 @@ def construct_model(images,
 
   num_timesteps = len(actions) - 1
   sum_freq = int(num_timesteps / 4 + 1)
+
+  _, _, van_higher_on_enc = van(
+      model_outputs.enc_out_all[0],
+      images[0],
+      enc_out,
+      images[0],
+      False,
+      scope_prefix='timestep/',
+      flags=flags)
+
+  model_outputs.van_higher_on_enc_all.append(van_higher_on_enc)
 
   reuse = False
   for timestep, action in zip(range(len(actions) - 1), actions[:-1]):
@@ -515,15 +715,18 @@ def construct_model(images,
         model_outputs.pose_from_pred_on_pose_all.append(
             get_pose_from_enc(pred_on_pose_out, pose_size))
 
-      van_out, _ = van(
+      if timestep % sum_freq == 0 and not flags.use_tpu:
+        tf.summary.histogram('lstm_state', lstm_states[0])
+      van_out, _, van_higher_on_pred = van(
           model_outputs.enc_out_all[0],
           images[0],
           pred_out,
           images[timestep + 1],
-          False,
+          tf.AUTO_REUSE,
           flags=flags)
       van_out = tf.identity(van_out, 'van_out')
       model_outputs.van_out_all.append(van_out)
+      model_outputs.van_higher_on_pred_all.append(van_higher_on_pred)
 
       enc_out = encoder_vgg(
           images[timestep + 1], flags.enc_size, True, flags=flags)
@@ -544,23 +747,24 @@ def construct_model(images,
         enc_noise = tf.zeros_like(enc_out)
       if timestep % sum_freq == 0 and not flags.use_tpu:
         tf.summary.histogram('enc_noise', enc_noise)
-      van_on_enc, _ = van(
+      van_on_enc, _, van_higher_on_enc = van(
           model_outputs.enc_out_all[0],
           van_input,
           enc_out + enc_noise,
           images[timestep + 1],
-          True,
+          tf.AUTO_REUSE,
           flags=flags)
       van_on_enc = tf.identity(van_on_enc, 'van_on_enc')
       model_outputs.van_on_enc_all.append(van_on_enc)
+      model_outputs.van_higher_on_enc_all.append(van_higher_on_enc)
 
       if flags.enc_size == pose_size:
-        van_on_pose, _ = van(
+        van_on_pose, _, van_higher_on_enc = van(
             poses[0],
             images[0],
             poses[timestep + 1],
             images[timestep + 1],
-            True,
+            tf.AUTO_REUSE,
             flags=flags)
         van_on_pose = tf.identity(van_on_pose, 'van_on_pose')
         model_outputs.van_on_pose_all.append(van_on_pose)
@@ -621,7 +825,8 @@ def make_model_fn(flags):
         model_outputs.enc_out_all[1:],
         model_outputs.pred_out_all,
         'enc_pred_loss',
-        flags=flags)
+        flags=flags,
+        use_l1_loss=flags.enc_pred_use_l1_loss)
 
     van_loss, _ = calc_loss_psnr(
         model_outputs.van_out_all, images[1:], 'van_loss', flags=flags)
@@ -655,21 +860,70 @@ def make_model_fn(flags):
     global_step = tf.train.get_or_create_global_step()
     increment_global_step = tf.assign(global_step, global_step + 1)
 
-    if flags.model_mode == 'epev':
+    if flags.model_mode == 'epva':
       enc_pred_loss_scale_delay = max(flags.enc_pred_loss_scale_delay, 1)
       enc_pred_loss_scale = tf.nn.sigmoid(
           (tf.to_float(tf.train.get_or_create_global_step()
                       ) - enc_pred_loss_scale_delay) /
           (enc_pred_loss_scale_delay * .1)) * flags.enc_pred_loss_scale
       tf.summary.scalar('enc_pred_loss_scale', enc_pred_loss_scale)
-      epev_loss = enc_pred_loss * enc_pred_loss_scale + van_on_enc_loss
-      tf.summary.scalar('epev_loss', epev_loss)
+      epva_loss = enc_pred_loss * enc_pred_loss_scale + van_on_enc_loss
+      tf.summary.scalar('epva_loss', epva_loss)
+
+    if flags.model_mode == 'epva_gan':
+      fake_enc = tf.transpose(
+          tf.convert_to_tensor(
+              model_outputs.van_higher_on_enc_all[0:flags.discrim_context] +
+              model_outputs.van_higher_on_pred_all[flags.discrim_context - 1:]),
+          [1, 0, 2])
+      real_enc = tf.transpose(model_outputs.van_higher_on_enc_all, [1, 0, 2])
+      gan_model = tf.contrib.gan.gan_model(
+          generator_fn=(lambda x: fake_enc),
+          discriminator_fn=get_enc_pred_discrim_full(flags),
+          real_data=real_enc,
+          generator_inputs=0)
+      gan_model = gan_model._replace(generator_variables=enc_vars + pred_vars)
+
+      discrim_vars = gan_model.discriminator_variables
+
+      if flags.use_wgan:
+
+        def generator_loss_fn(gan_model, add_summaries):
+          del add_summaries
+          return tf.negative(
+              tf.reduce_mean(gan_model.discriminator_gen_outputs -
+                             gan_model.discriminator_real_outputs))
+
+        gan_loss = tf.contrib.gan.gan_loss(
+            gan_model,
+            generator_loss_fn=generator_loss_fn,
+            discriminator_loss_fn=tf.contrib.gan.losses.
+            wasserstein_discriminator_loss,
+            gradient_penalty_weight=10)
+      else:
+        gan_loss = tf.contrib.gan.gan_loss(
+            gan_model,
+            discriminator_loss_fn=tf.contrib.gan.losses.
+            modified_discriminator_loss)
+        gan_loss = gan_loss._replace(
+            generator_loss=-gan_loss.discriminator_loss)
+
+      enc_pred_loss_gan = gan_loss.generator_loss
+      tf.summary.scalar('enc_pred_loss_gan', enc_pred_loss_gan)
+
+      enc_pred_loss_total = (
+          enc_pred_loss_gan + enc_pred_loss * flags.enc_pred_loss_scale)
+      tf.summary.scalar('enc_pred_loss_total', enc_pred_loss_total)
+
+      discrim_total_loss = gan_loss.discriminator_loss
+      tf.summary.scalar('discrim_total_loss', discrim_total_loss)
 
     all_train_op = None
     if flags.is_training:
       enc_optimizer = tf.train.AdamOptimizer(flags.enc_learning_rate)
       pred_optimizer = tf.train.AdamOptimizer(flags.pred_learning_rate)
       van_optimizer = tf.train.AdamOptimizer(flags.van_learning_rate)
+      discrim_optimizer = tf.train.AdamOptimizer(flags.discrim_learning_rate)
       all_optimizer = tf.train.AdamOptimizer(flags.all_learning_rate)
 
       if flags.use_tpu:
@@ -724,9 +978,9 @@ def make_model_fn(flags):
                 enc_train_op, pred_train_op, van_train_op, increment_global_step
             ])[0]
 
-      if flags.model_mode == 'epev':
+      if flags.model_mode == 'epva':
         all_train_op = slim.learning.create_train_op(
-            epev_loss,
+            epva_loss,
             all_optimizer,
             clip_gradient_norm=flags.clip_gradient_norm,
             variables_to_train=all_vars)
@@ -758,6 +1012,48 @@ def make_model_fn(flags):
             all_optimizer,
             clip_gradient_norm=flags.clip_gradient_norm,
             variables_to_train=all_vars)
+
+      if flags.model_mode == 'epva_gan':
+        both_step = tf.Variable(0, dtype=tf.float32)
+        increment_both_step = tf.assign(both_step, both_step + 1)
+
+        def get_discrim_train_op():
+          """Returns the opp to train the discrim."""
+          discrim_train_op = tf.tuple(
+              [discrim_total_loss],
+              control_inputs=[
+                  slim.learning.create_train_op(
+                      discrim_total_loss,
+                      discrim_optimizer,
+                      global_step=fake_step,
+                      variables_to_train=discrim_vars),
+              ])
+          return discrim_train_op
+
+        def get_epva_train_op():
+          """Returns the opp to train rest of the model."""
+          pred_train_op = slim.learning.create_train_op(
+              enc_pred_loss_total,
+              pred_optimizer,
+              clip_gradient_norm=flags.clip_gradient_norm,
+              global_step=global_step,
+              variables_to_train=enc_vars + pred_vars)
+
+          van_train_op = slim.learning.create_train_op(
+              van_on_enc_loss,
+              van_optimizer,
+              clip_gradient_norm=flags.clip_gradient_norm,
+              global_step=fake_step,
+              variables_to_train=enc_vars + van_vars)
+
+          epva_train_op = tf.tuple(
+              [enc_pred_loss_total],
+              control_inputs=[pred_train_op, van_train_op, increment_both_step])
+          return epva_train_op
+
+        mod_both_step = tf.mod(both_step, flags.discrim_steps_per_pred + 1)
+        all_train_op = tf.cond(
+            tf.equal(mod_both_step, 0), get_epva_train_op, get_discrim_train_op)
 
     predictions = None
     if mode == tf.estimator.ModeKeys.PREDICT:
@@ -822,12 +1118,14 @@ def l1_error(true, pred):
   return tf.reduce_sum(tf.abs(true - pred)) / tf.to_float(tf.size(pred))
 
 
-def calc_loss_psnr(gen_images, images, name, flags=None):
+def calc_loss_psnr(gen_images, images, name, flags=None, use_l1_loss=False):
   """Calculates loss and psnr for predictions over multiple timesteps."""
   with tf.name_scope(name):
     loss, error, psnr_all = 0.0, 0.0, 0.0
     for _, x, gx in zip(range(len(gen_images)), images, gen_images):
       recon_cost = mean_squared_error(x, gx)
+      if use_l1_loss:
+        recon_cost = l1_error(x, gx)
 
       error_i = l1_error(x, gx)
       psnr_i = peak_signal_to_noise_ratio(x, gx)
@@ -980,7 +1278,7 @@ def calc_quaternion_loss(predictions, labels, params):
 
 def add_video_summary(images, name):
   sum_freq = int(len(images) / 4 + 1)
-  for i in range(0, len(images), sum_freq) + [len(images)-1]:
+  for i in range(0, len(images), sum_freq) + [len(images) - 1]:
     tf.summary.image(name + '_frame_' + str(i), images[i], 4)
 
 

@@ -22,14 +22,13 @@ import tensorflow as tf
 import tensorflow.contrib.slim as slim
 from tensorflow.python import debug as tf_debug
 from tensorflow.python.platform import app
-from tensorflow.python.platform import flags
 
+flags = tf.app.flags
 FLAGS = flags.FLAGS
 
 flags.DEFINE_string(
     'model_mode', 'e2e', 'Mode to run in. Possible values:'
-    "'individual', 'epev', 'epev_gann', 'e2epose_oneop', 'e2epose_sepop', 'e2e'"
-)
+    "'individual', 'epva', 'epva_gan', 'e2epose_oneop', 'e2epose_sepop', 'e2e'")
 
 flags.DEFINE_integer('pose_dim', 5, 'Dimension of the end effector pose.')
 flags.DEFINE_integer('joint_pos_dim', 7, 'Dimension of the joint positions.')
@@ -40,9 +39,10 @@ flags.DEFINE_bool('prefetch_enabled', True,
 flags.DEFINE_integer('prefetch_dataset_buffer_size', 256 * 1024 * 1024,
                      'Number of bytes in read buffer. 0 means no buffering.')
 
-flags.DEFINE_integer('cycle_length', 64,
-                     'Number of elements from dataset to process concurrently '
-                     '(by interleaver)')
+flags.DEFINE_integer(
+    'cycle_length', 64,
+    'Number of elements from dataset to process concurrently '
+    '(by interleaver)')
 
 flags.DEFINE_integer(
     'block_length', None,
@@ -69,19 +69,38 @@ flags.DEFINE_float('enc_keep_prob', 1.0, 'Dropout keep prob for the encoder.')
 flags.DEFINE_float('van_keep_prob', 1.0, 'Dropout keep prob for the VAN')
 flags.DEFINE_float('enc_noise_stddev', 0, 'Noise between the encoder and VAN')
 flags.DEFINE_bool('is_training', False, 'Passed to the VGG encoder')
+flags.DEFINE_bool(
+    'enc_pred_use_l1_loss', False, 'True to use l1 loss between'
+    ' the encoder and predictor instead of l2')
 
-flags.DEFINE_integer('enc_size', 64, '')
+flags.DEFINE_bool(
+    'color_data_augment', False, 'Set to true to augment the data'
+    ' by randomly changing the hue.')
+flags.DEFINE_bool('encoder_grey_in', False, 'True to convert the encoder input'
+                  ' to grey scale.')
+
+flags.DEFINE_integer('enc_size', 64, 'The size of the higher level structure.')
+flags.DEFINE_float('pred_noise_std', 0.0,
+                   'The noise to be fed as additional input to the predictor.')
+flags.DEFINE_integer(
+    'discrim_steps_per_pred', 5, 'Number of times to train the'
+    ' discrim for each train of the predictor.')
+flags.DEFINE_bool('use_wgan', True, 'True: Wgan, False: Regular gan')
+flags.DEFINE_integer(
+    'discrim_context', 1, 'The number of context frames to'
+    ' feed into the discrim.')
 
 flags.DEFINE_integer('sequence_length', 10,
                      'sequence length, including context frames.')
 flags.DEFINE_integer('skip_num', 1,
                      'Number of frames to skip when reading input')
 flags.DEFINE_string(
-    'dataset_type', 'robot',
+    'dataset_type', 'human',
     'Controls how data is read in the input pipeline. Possible values:'
     "'robot', 'human'")
 
-flags.DEFINE_string('data_dir', '', 'directory containing data.')
+flags.DEFINE_string('data_dir', 'gs://unsupervised-hierarch-video/data',
+                    'directory containing data.')
 flags.DEFINE_string('model_dir', '', 'directory for model checkpoints.')
 flags.DEFINE_string('event_log_dir', '', 'directory for writing summary.')
 flags.DEFINE_integer('train_steps', 4800000,
@@ -99,7 +118,10 @@ flags.DEFINE_integer('batch_size', 8,
 
 flags.DEFINE_bool('imgnet_pretrain', False,
                   'Whether to pretrain the encoder on imagenet.')
-flags.DEFINE_string('pretrain_path', '', '')
+flags.DEFINE_string(
+    'epv_pretrain_ckpt',
+    'gs://unsupervised-hierarch-video/pretrained_models/epev_human/',
+    'The checkpoint to start training from.')
 
 flags.DEFINE_boolean(
     'per_host_input_for_training', True,
@@ -111,11 +133,16 @@ flags.DEFINE_float('pred_learning_rate', 3e-4,
                    'Used when the predictor is trained separately.')
 flags.DEFINE_float('van_learning_rate', 3e-5,
                    'Used when the VAN is trained separately.')
+flags.DEFINE_float('discrim_learning_rate', 1e-2,
+                   'Used for the discriminator in epva_gan mode.')
 flags.DEFINE_float('all_learning_rate', 1e-5,
                    'Used when multiple parts are trained together.')
 
 flags.DEFINE_float('enc_pred_loss_scale', 1e-2,
                    'The scale of the encoder and predictor loss.')
+flags.DEFINE_float('lstm_state_noise_stddev', 0, 'Noise to add to the lstm'
+                   ' states in between predictions.')
+
 flags.DEFINE_float(
     'enc_pred_loss_scale_delay', 0,
     'Number of steps for the scale to reach half of its maximum.')
@@ -146,8 +173,7 @@ flags.DEFINE_integer('save_checkpoints_secs', 60,
                      'The frequency with which the model is saved, in seconds.')
 
 flags.DEFINE_integer('task', 0, 'Task id of the replica running the training.')
-flags.DEFINE_string('master', 'local',
-                    'BNS name of the TensorFlow master to use.')
+flags.DEFINE_string('master', '', 'BNS name of the TensorFlow master to use.')
 flags.DEFINE_integer('startup_delay_secs', 15,
                      'Number of training steps between replicas startup.')
 
@@ -168,7 +194,29 @@ def _get_init_fn():
     An init function run by the supervisor.
   """
 
-  if FLAGS.imgnet_pretrain:
+  if FLAGS.epv_pretrain_ckpt:
+    enc_vars = tf.get_collection(
+        tf.GraphKeys.TRAINABLE_VARIABLES, scope='timestep/encoder')
+    pred_vars = tf.get_collection(
+        tf.GraphKeys.TRAINABLE_VARIABLES, scope='timestep/predict')
+    van_vars = tf.get_collection(
+        tf.GraphKeys.TRAINABLE_VARIABLES, scope='timestep/van')
+    all_vars = enc_vars + van_vars + pred_vars
+
+    assignment_map = {}
+    for var in all_vars:
+      if ('Variable' not in var.op.name) and (
+          'back_connect_init' not in var.op.name) and (
+              'noise_dense' not in var.op.name):
+        assignment_map[var.op.name] = var.op.name
+
+    print 'Fine-tuning from %s' % FLAGS.epv_pretrain_ckpt
+    sys.stdout.flush()
+
+    return tf.train.init_from_checkpoint(FLAGS.epv_pretrain_ckpt,
+                                         assignment_map)
+
+  elif FLAGS.imgnet_pretrain:
     vgg_vars = tf.get_collection(
         tf.GraphKeys.TRAINABLE_VARIABLES, scope='timestep/encoder/vgg_16')
 
@@ -177,10 +225,12 @@ def _get_init_fn():
       if not var.op.name.startswith('timestep/encoder/vgg_16/fc8'):
         assignment_map[var.op.name[len('timestep/encoder/'):]] = var.op.name
 
-    print 'Fine-tuning from %s' % FLAGS.pretrain_path
+    checkpoint_path = 'gs://unsupervised-hierarch-video/pretrained_models/vgg_16.ckpt'
+
+    print 'Fine-tuning from %s' % checkpoint_path
     sys.stdout.flush()
 
-    return tf.train.init_from_checkpoint(FLAGS.pretrain_path, assignment_map)
+    return tf.train.init_from_checkpoint(checkpoint_path, assignment_map)
 
 
 def tf_dbg_sess_wrapper(sess):
