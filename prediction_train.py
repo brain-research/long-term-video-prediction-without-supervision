@@ -120,7 +120,7 @@ flags.DEFINE_bool('imgnet_pretrain', False,
                   'Whether to pretrain the encoder on imagenet.')
 flags.DEFINE_string(
     'epv_pretrain_ckpt',
-    'gs://unsupervised-hierarch-video/pretrained_models/epev_human/',
+    'gs://unsupervised-hierarch-video/pretrained_models/epva_human/',
     'The checkpoint to start training from.')
 
 flags.DEFINE_boolean(
@@ -148,7 +148,7 @@ flags.DEFINE_float(
     'Number of steps for the scale to reach half of its maximum.')
 flags.DEFINE_boolean(
     'enc_pred_use_l2norm', False,
-    'Use the L2 norm of the encoder and predictor in EPEV mode.')
+    'Use the L2 norm of the encoder and predictor in epva mode.')
 
 flags.DEFINE_float('pose_weight', 1,
                    'The weight of the pose loss in the e2e with pose method.')
