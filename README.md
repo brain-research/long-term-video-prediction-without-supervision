@@ -1,7 +1,6 @@
-# Unsupervised Hierarchical Video Prediction
+# Learning Long-term Video Prediction Models without Supervision
 
-This is the implementation of [Unsupervised Hierarchical Video
-Prediction](https://openreview.net/pdf?id=rkmtTJZCb).
+This is the implementation of [Learning Long-term Video Prediction Models without Supervision]().
 
 It can predict future frames in a video given the first few frames as context
 and optionally the agent's action.
