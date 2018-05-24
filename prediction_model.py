@@ -17,7 +17,7 @@
 import prediction_input
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
-from tensorflow.contrib.tpu import CrossShardOptimizer
+#from tensorflow.contrib.tpu import CrossShardOptimizer
 import tf_ops
 
 
@@ -216,7 +216,7 @@ def van_dec_2d(x, skip_connections, output_shape, first_depth, flags=None):
     mask = tf.nn.sigmoid(out_mask[:, :, :, 3:4])
     out = out_mask[:, :, :, :3]
 
-    return out * mask + skip_connections[0] * (1 - mask)
+    return out * mask + skip_connections[0] * (1 - mask), mask
 
 
 def analogy_computation_2d(f_first_enc,
@@ -308,13 +308,13 @@ def van(first_enc,
         f_first_enc, f_first_frame, f_current_enc, first_depth, flags=flags)
     enc_img = f_current_enc + analogy_t
 
-    img = van_dec_2d(
+    img, mask = van_dec_2d(
         enc_img, image_enc_history, output_shape, first_depth, flags=flags)
 
     batch_size = tf.to_float(tf.shape(first_enc)[0])
     r_loss = tf.nn.l2_loss(f_gt_image - f_current_enc - analogy_t) / batch_size
 
-    return img, r_loss, van_higher_level
+    return img, r_loss, van_higher_level, mask
 
 
 def encoder_vgg(x, enc_final_size, reuse=False, scope_prefix='', flags=None):
@@ -637,6 +637,7 @@ class ModelOutputs(object):
     self.pred_on_pose_out_all = []
     self.pose_from_pred_on_pose_all = []
     self.van_out_all = []
+    self.mask_out_all = []
     self.van_on_enc_all = []
     self.van_on_pose_all = []
     self.van_higher_on_enc_all = []
@@ -669,7 +670,7 @@ def construct_model(images,
   num_timesteps = len(actions) - 1
   sum_freq = int(num_timesteps / 4 + 1)
 
-  _, _, van_higher_on_enc = van(
+  _, _, van_higher_on_enc, _ = van(
       model_outputs.enc_out_all[0],
       images[0],
       enc_out,
@@ -717,15 +718,17 @@ def construct_model(images,
 
       if timestep % sum_freq == 0 and not flags.use_tpu:
         tf.summary.histogram('lstm_state', lstm_states[0])
-      van_out, _, van_higher_on_pred = van(
+      van_out, _, van_higher_on_pred, mask = van(
           model_outputs.enc_out_all[0],
           images[0],
           pred_out,
           images[timestep + 1],
-          tf.AUTO_REUSE,
+          True,
           flags=flags)
       van_out = tf.identity(van_out, 'van_out')
       model_outputs.van_out_all.append(van_out)
+      mask = tf.divide(mask, tf.reduce_max(mask, axis=[1,2,3], keep_dims=True))
+      model_outputs.mask_out_all.append(mask)
       model_outputs.van_higher_on_pred_all.append(van_higher_on_pred)
 
       enc_out = encoder_vgg(
@@ -747,24 +750,24 @@ def construct_model(images,
         enc_noise = tf.zeros_like(enc_out)
       if timestep % sum_freq == 0 and not flags.use_tpu:
         tf.summary.histogram('enc_noise', enc_noise)
-      van_on_enc, _, van_higher_on_enc = van(
+      van_on_enc, _, van_higher_on_enc, _ = van(
           model_outputs.enc_out_all[0],
           van_input,
           enc_out + enc_noise,
           images[timestep + 1],
-          tf.AUTO_REUSE,
+          True,
           flags=flags)
       van_on_enc = tf.identity(van_on_enc, 'van_on_enc')
       model_outputs.van_on_enc_all.append(van_on_enc)
       model_outputs.van_higher_on_enc_all.append(van_higher_on_enc)
 
       if flags.enc_size == pose_size:
-        van_on_pose, _, van_higher_on_enc = van(
+        van_on_pose, _, van_higher_on_enc, _ = van(
             poses[0],
             images[0],
             poses[timestep + 1],
             images[timestep + 1],
-            tf.AUTO_REUSE,
+            True,
             flags=flags)
         van_on_pose = tf.identity(van_on_pose, 'van_on_pose')
         model_outputs.van_on_pose_all.append(van_on_pose)
@@ -1060,6 +1063,7 @@ def make_model_fn(flags):
       predictions_lst = {
           'gt_images': images,
           'van_out_all': model_outputs.van_out_all,
+          'mask_out_all': model_outputs.mask_out_all,
           'van_on_enc_all': model_outputs.van_on_enc_all
       }
 

@@ -18,7 +18,6 @@ from __future__ import division
 from __future__ import print_function
 
 import math
-import google3
 
 import tensorflow as tf
 
