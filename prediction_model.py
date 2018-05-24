@@ -17,7 +17,7 @@
 import prediction_input
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
-#from tensorflow.contrib.tpu import CrossShardOptimizer
+from tensorflow.contrib.tpu import CrossShardOptimizer
 import tf_ops
 
 
@@ -723,11 +723,11 @@ def construct_model(images,
           images[0],
           pred_out,
           images[timestep + 1],
-          True,
+          tf.AUTO_REUSE,
           flags=flags)
       van_out = tf.identity(van_out, 'van_out')
       model_outputs.van_out_all.append(van_out)
-      mask = tf.divide(mask, tf.reduce_max(mask, axis=[1,2,3], keep_dims=True))
+      mask = tf.divide(mask, tf.reduce_max(mask, axis=[1,2,3], keepdims=True))
       model_outputs.mask_out_all.append(mask)
       model_outputs.van_higher_on_pred_all.append(van_higher_on_pred)
 
@@ -755,7 +755,7 @@ def construct_model(images,
           van_input,
           enc_out + enc_noise,
           images[timestep + 1],
-          True,
+          tf.AUTO_REUSE,
           flags=flags)
       van_on_enc = tf.identity(van_on_enc, 'van_on_enc')
       model_outputs.van_on_enc_all.append(van_on_enc)
@@ -767,7 +767,7 @@ def construct_model(images,
             images[0],
             poses[timestep + 1],
             images[timestep + 1],
-            True,
+            tf.AUTO_REUSE,
             flags=flags)
         van_on_pose = tf.identity(van_on_pose, 'van_on_pose')
         model_outputs.van_on_pose_all.append(van_on_pose)

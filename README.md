@@ -1,6 +1,7 @@
 # Learning Long-term Video Prediction Models without Supervision
 
-This is the implementation of [Learning Long-term Video Prediction Models without Supervision]().
+This is the implementation of [Learning Long-term Video Prediction Models
+without Supervision]().
 
 It can predict future frames in a video given the first few frames as context
 and optionally the agent's action.
@@ -11,6 +12,8 @@ predicted frame from the predicted structure.
 
 The included code works for both the Humans 3.6M[^1] and the Robot Push
 Dataset[^2], but the results are more impressive on the Humans dataset.
+
+This code is tested on TensorFlow Version 1.7.0
 
 ## Training
 
