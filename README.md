@@ -1,7 +1,6 @@
-# Learning Long-term Video Prediction Models without Supervision
+# Long-term Video Prediction without Supervision
 
-This is the implementation of [Learning Long-term Video Prediction Models
-without Supervision]().
+This is the implementation of [Long-term Video Prediction without Supervision]().
 
 It can predict future frames in a video given the first few frames as context
 and optionally the agent's action.
