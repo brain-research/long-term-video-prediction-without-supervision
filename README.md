@@ -1,6 +1,6 @@
-# Long-term Video Prediction without Supervision
+# Hierarchical Long-term Video Prediction without Supervision
 
-This is the implementation of [Long-term Video Prediction without Supervision]().
+This is the implementation of [Hierarchical Long-term Video Prediction without Supervision]().
 
 It can predict future frames in a video given the first few frames as context
 and optionally the agent's action.
