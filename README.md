@@ -75,6 +75,8 @@ data.
 These commands have the best known hyperparameters for each mode and dataset.
 The learning rate and batch size were optimized for parallel async training on
 32 GPUs, so they may not be optimal for training on a single GPU.
+Below, we provide the hyperparameters for single GPU training on the Human 3.6M
+dataset.
 
 For all commands, set "model_dir" and "event_log_dir" to the location where the
 model and tensorboard logs should be saved.
@@ -91,7 +93,7 @@ Use the same commands for validation except:
 
 ### Humans dataset
 
-#### EPVA Gan:
+#### EPVA Gan (Multi-GPU Hyperparameters):
 
 This command starts training from a pretrained EPVA checkpoint. Follow the steps
 above to install gcloud and sign in to use the command EPVA gan command.
@@ -106,7 +108,11 @@ pass `--epv_pretrain_ckpt <Download path>`.
 --context_frames 5 --run_mode "train" --is_training --train_steps 1000000
 --clip_gradient_norm .01 --pred_noise_std 1.0 --enc_pred_use_l2norm`
 
-#### EPVA:
+#### EPVA Gan (Single-GPU Hyperparameters):
+
+Coming soon....
+
+#### EPVA (Multi-GPU Hyperparameters):
 
 This command starts training the encoder from a pretrained imagenet checkpoint.
 You have the same option to either run as is or download the checkpoint. You can
@@ -120,6 +126,22 @@ and change the `checkpoint_path` variable in `prediction_train`.
 --sequence_length 64 --skip_num 2 --context_frames 5 --run_mode "train"
 --is_training --train_steps 3000000 --clip_gradient_norm .01 --epv_pretrain_ckpt
 ''`
+
+#### EPVA (Single-GPU Hyperparameters):
+
+This command starts training the encoder from a pretrained imagenet checkpoint.
+You have the same option to either run as is or download the checkpoint. You can
+download the checkpoint
+[here](https://storage.googleapis.com/unsupervised-hierarch-video/pretrained_models/vgg_16.ckpt),
+and change the `checkpoint_path` variable in `prediction_train`.
+
+`python prediction_train.py --model_mode epva --imgnet_pretrain
+--all_learning_rate 1e-04 --enc_pred_loss_scale .1 --enc_pred_loss_scale_delay
+2e4 --enc_size_set 64 --enc_keep_prob .65 --van_keep_prob .9 --batch_size 8
+--sequence_length 64 --skip_num 2 --context_frames 5 --run_mode "train"
+--is_training --train_steps 120000 --clip_gradient_norm .01 --epv_pretrain_ckpt
+''`
+
 
 #### E2E:
 
