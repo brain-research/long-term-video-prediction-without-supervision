@@ -158,7 +158,7 @@ E2E:
 `python prediction_train.py --model_mode e2e --dataset_type robot
 --all_learning_rate 1e-05 --enc_size_set 16 --enc_keep_prob .65 --van_keep_prob
 .9 --batch_size 8 --sequence_length 20 --skip_num 1 --run_mode "train"
---is_training --train_steps 3000000 --clip_gradient_norm .01`
+--is_training --train_steps 3000000 --clip_gradient_norm .01 --epv_pretrain_ckpt ''`
 
 EPVA:
 
@@ -166,7 +166,7 @@ EPVA:
 --imgnet_pretrain --all_learning_rate 1e-05 --enc_pred_loss_scale 1
 --enc_pred_loss_scale_delay 6e5 --enc_size_set 32 --enc_keep_prob .65
 --van_keep_prob .9 --batch_size 8 --sequence_length 20 --skip_num 1 --run_mode
-"train" --is_training --train_steps 3000000 --clip_gradient_norm .01`
+"train" --is_training --train_steps 3000000 --clip_gradient_norm .01 --epv_pretrain_ckpt ''`
 
 Individual:
 
@@ -174,7 +174,7 @@ Individual:
 --enc_learning_rate 1e-5 --pred_learning_rate_map 3e-4 --van_learning_rate 3e-5
 --enc_size_set 12 --enc_keep_prob .75 --van_keep_prob 1.0 --batch_size 8
 --sequence_length 20 --skip_num 1 --run_mode "train" --is_training --train_steps
-3000000 --clip_gradient_norm .01`
+3000000 --clip_gradient_norm .01 --epv_pretrain_ckpt ''`
 
 ## Inference on pretrained models.
 
