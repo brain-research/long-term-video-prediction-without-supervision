@@ -97,7 +97,7 @@ Use the same commands for validation except:
 
 This command starts training from a pretrained EPVA checkpoint. Follow the steps
 above to install gcloud and sign in to use the command EPVA gan command.
-Alternatively, download the checkpoint with `gsutil cp -r
+Alternatively, download the checkpoint [here](https://storage.googleapis.com/unsupervised-hierarch-video/pretrained_models/epva_human.zip) or with `gsutil cp -r
 gs://unsupervised-hierarch-video/pretrained_models/epva_human ~/Downloads` and
 pass `--epv_pretrain_ckpt <Download path>`.
 
